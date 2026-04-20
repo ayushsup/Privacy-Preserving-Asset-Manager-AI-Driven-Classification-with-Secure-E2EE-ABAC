@@ -53,15 +53,23 @@ export default function Dashboard({ auth, onLogout }) {
         return;
       }
 
-      setActionStatus({ type: "success", message: "Decrypting locally..." });
+      setActionStatus({ type: "success", message: "Downloading encrypted file..." });
       const encBlob = await downloadEncryptedBlob(auth.access_token, activeFile.id, policyMode, new Date().getHours());
+      
+      setActionStatus({ type: "success", message: "Importing decryption key..." });
       const key = await importKeyFromBase64(decryptKey.trim());
+      
+      setActionStatus({ type: "success", message: "Decrypting locally..." });
       const plainBlob = await decryptBlob(encBlob, key, activeFile.iv_b64, activeFile.mime_type);
       
+      setActionStatus({ type: "success", message: "Preparing download..." });
       triggerBrowserDownload(plainBlob, activeFile.original_filename);
-      setTimeout(() => { setActiveFile(null); setDecryptKey(""); setActionStatus({ type: "", message: "" }); }, 1000);
+      setActionStatus({ type: "success", message: "File downloaded successfully!" });
+      setTimeout(() => { setActiveFile(null); setDecryptKey(""); setActionStatus({ type: "", message: "" }); }, 1500);
     } catch (err) {
-      setActionStatus({ type: "error", message: err.message });
+      const errorMsg = err?.message || String(err) || "An unexpected error occurred";
+      console.error("Decryption error:", err, "Stack:", err?.stack);
+      setActionStatus({ type: "error", message: errorMsg });
     } finally {
       setIsProcessing(false);
     }
@@ -79,8 +87,6 @@ export default function Dashboard({ auth, onLogout }) {
         <div style={{ flex: 1 }}>
             <p className="stat-label" style={{marginBottom: '12px'}}>Navigation</p>
             <div className="nav-item active">Asset Library</div>
-            <div className="nav-item inactive" onClick={() => showToast("Policy Engine configuration coming in v2.0")}>Policy Engine</div>
-            <div className="nav-item inactive" onClick={() => showToast("Audit Logs tracking coming in v2.0")}>Audit Logs</div>
         </div>
         
         <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '20px' }}>

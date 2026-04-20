@@ -6,133 +6,227 @@ import UploadForm from "./UploadForm";
 export default function Dashboard({ auth, onLogout }) {
   const [files, setFiles] = useState([]);
   const [error, setError] = useState("");
+  const [toastMessage, setToastMessage] = useState(null);
+  
+  // Modals
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [activeFile, setActiveFile] = useState(null);
+  
+  // Evaluation State
   const [decryptKey, setDecryptKey] = useState("");
   const [policyMode, setPolicyMode] = useState("abac");
-  const [actionStatus, setActionStatus] = useState("");
+  const [actionStatus, setActionStatus] = useState({ type: "", message: "" });
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => { refreshFiles(); }, []);
 
   async function refreshFiles() {
     try {
       const data = await listFiles(auth.access_token);
       setFiles(data);
     } catch (err) {
-      setError(err.message);
+      setError("Unable to connect to the secure vault.");
     }
   }
 
-  useEffect(() => {
-    refreshFiles();
-  }, []);
+  function showToast(message) {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 3000);
+  }
 
-  async function handleDownload(file) {
-    setActionStatus("");
-    
+  async function handleDownload(e) {
+    e.preventDefault();
+    setActionStatus({ type: "", message: "" });
     if (!decryptKey.trim()) {
-      setActionStatus("Please enter your decryption key at the top of the dashboard first.");
+      setActionStatus({ type: "error", message: "Decryption key is required." });
       return;
     }
 
+    setIsProcessing(true);
     try {
-      // 1. Evaluate Access
-      const access = await evaluateAccess(
-        auth.access_token,
-        file.id,
-        new Date().getHours(),
-        policyMode
-      );
+      setActionStatus({ type: "success", message: "Evaluating ABAC context..." });
+      const access = await evaluateAccess(auth.access_token, activeFile.id, new Date().getHours(), policyMode);
 
       if (!access.allowed) {
-        setActionStatus(`Access Denied: ${access.reason}`);
+        setActionStatus({ type: "error", message: `Access Denied: ${access.reason}` });
+        setIsProcessing(false);
         return;
       }
 
-      // 2. Download & Decrypt
-      setActionStatus(`Downloading ${file.original_filename}...`);
-      const encBlob = await downloadEncryptedBlob(
-        auth.access_token,
-        file.id,
-        policyMode,
-        new Date().getHours()
-      );
-
+      setActionStatus({ type: "success", message: "Decrypting locally..." });
+      const encBlob = await downloadEncryptedBlob(auth.access_token, activeFile.id, policyMode, new Date().getHours());
       const key = await importKeyFromBase64(decryptKey.trim());
-      const plainBlob = await decryptBlob(encBlob, key, file.iv_b64, file.mime_type);
-      triggerBrowserDownload(plainBlob, file.original_filename);
+      const plainBlob = await decryptBlob(encBlob, key, activeFile.iv_b64, activeFile.mime_type);
       
-      setActionStatus(""); // Clear status on success
+      triggerBrowserDownload(plainBlob, activeFile.original_filename);
+      setTimeout(() => { setActiveFile(null); setDecryptKey(""); setActionStatus({ type: "", message: "" }); }, 1000);
     } catch (err) {
-      setActionStatus(`Error: ${err.message}`);
+      setActionStatus({ type: "error", message: err.message });
+    } finally {
+      setIsProcessing(false);
     }
   }
 
   return (
-    <div className="dashboard">
-      <div className="topbar card" style={{ padding: "16px 24px" }}>
-        <div>
-          <h2>Privacy Asset Manager</h2>
-          <p className="muted" style={{ margin: 0 }}>
-            Logged in as: <strong style={{ color: "white" }}>{auth.user.full_name}</strong> | Role: {auth.user.role} | Dept: {auth.user.department}
-          </p>
+    <div className="app-layout">
+      {/* Sidebar Navigation */}
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="orb"></div>
+          PAM Vault
         </div>
-        <button onClick={onLogout} style={{ background: "transparent", border: "1px solid var(--muted)", color: "var(--muted)" }}>
-            Sign Out
-        </button>
-      </div>
-
-      <UploadForm token={auth.access_token} onUploaded={refreshFiles} />
-
-      <div className="card" style={{ background: "rgba(16, 185, 129, 0.05)", borderColor: "rgba(16, 185, 129, 0.2)" }}>
-        <h3 style={{ color: "var(--accent)" }}>Client-Side Decryption Engine</h3>
-        <p className="muted" style={{ fontSize: "14px", marginTop: "-8px" }}>
-            Files are downloaded as encrypted blobs. Provide your AES key to decrypt them locally.
-        </p>
-        <div style={{ display: "flex", gap: "16px", alignItems: "flex-start" }}>
-            <div style={{ flex: 2 }}>
-                <input
-                    type="password"
-                    placeholder="Paste your saved base64 AES key here..."
-                    value={decryptKey}
-                    onChange={(e) => setDecryptKey(e.target.value)}
-                    style={{ margin: 0 }}
-                />
-            </div>
-            <div style={{ flex: 1 }}>
-                <select value={policyMode} onChange={(e) => setPolicyMode(e.target.value)} style={{ margin: 0 }}>
-                    <option value="abac">Enforce ABAC Rules</option>
-                    <option value="rbac">Enforce RBAC Rules</option>
-                </select>
-            </div>
+        
+        <div style={{ flex: 1 }}>
+            <p className="stat-label" style={{marginBottom: '12px'}}>Navigation</p>
+            <div className="nav-item active">Asset Library</div>
+            <div className="nav-item inactive" onClick={() => showToast("Policy Engine configuration coming in v2.0")}>Policy Engine</div>
+            <div className="nav-item inactive" onClick={() => showToast("Audit Logs tracking coming in v2.0")}>Audit Logs</div>
         </div>
-      </div>
+        
+        <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '20px' }}>
+          <p style={{ margin: 0, fontWeight: 600 }}>{auth.user.full_name}</p>
+          <p className="text-muted" style={{ fontSize: '12px', marginBottom: '16px' }}>{auth.user.department} • {auth.user.role}</p>
+          <button className="secondary" style={{ width: '100%' }} onClick={onLogout}>Sign Out</button>
+        </div>
+      </aside>
 
-      <div className="card">
-        <h3>Asset Library</h3>
-        {error && <div className="error-text">Failed to load files: {error}</div>}
-        {actionStatus && <div className={actionStatus.includes("Error") || actionStatus.includes("Denied") ? "error-text" : "success-text"} style={{ marginBottom: "16px" }}>{actionStatus}</div>}
+      {/* Main Content Area */}
+      <main className="main-content">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
+          <div>
+            <h1>Secure Asset Dashboard</h1>
+            <p className="text-muted" style={{marginTop: '4px'}}>Zero-knowledge storage protected by ABAC & E2EE.</p>
+          </div>
+          <button className="primary" onClick={() => setIsUploadOpen(true)}>
+            + Encrypt New File
+          </button>
+        </div>
+
+        {/* Analytics Row */}
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Total Assets</div>
+            <div className="stat-value">{files.length}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">High Risk Data</div>
+            <div className="stat-value" style={{ color: 'var(--danger)' }}>
+                {files.filter(f => f.sensitivity === 'High').length}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Active Policies</div>
+            <div className="stat-value" style={{ color: 'var(--accent-primary)', fontSize: '1.5rem', display: 'flex', alignItems: 'center', height: '100%' }}>ABAC Enforced</div>
+          </div>
+        </div>
+
+        {/* Asset Grid */}
+        <h3 style={{ marginBottom: '24px' }}>Encrypted Vault</h3>
+        {error && <div className="alert error">{error}</div>}
         
         <div className="file-grid">
           {files.map((file) => (
             <div key={file.id} className="file-card">
-              <span className={`badge ${file.sensitivity}`}>
-                  {file.sensitivity} Sensitivity
-              </span>
-              <h4 title={file.original_filename}>{file.original_filename}</h4>
-              
-              <div className="muted" style={{ fontSize: "13px", marginBottom: "16px", flex: 1 }}>
-                  <div><strong>AI Category:</strong> {file.category}</div>
-                  <div><strong>Department:</strong> {file.department}</div>
-                  <div><strong>Owner:</strong> {file.owner_username}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                <h4 title={file.original_filename} style={{ paddingRight: '12px', wordBreak: 'break-all' }}>
+                  {file.original_filename.length > 35 ? file.original_filename.substring(0,35) + '...' : file.original_filename}
+                </h4>
+                <span className={`badge ${file.sensitivity}`}>{file.sensitivity}</span>
               </div>
-
-              <button onClick={() => handleDownload(file)}>
-                  Evaluate & Download
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px' }}>
+                      <span className="text-muted" style={{ fontSize: '13px' }}>AI Classification</span>
+                      <span className="mono" style={{ color: 'var(--accent-primary)' }}>{file.category}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px' }}>
+                      <span className="text-muted" style={{ fontSize: '13px' }}>Department</span>
+                      <strong style={{ fontSize: '13px' }}>{file.department}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span className="text-muted" style={{ fontSize: '13px' }}>Owner</span>
+                      <span style={{ fontSize: '13px' }}>{file.owner_username}</span>
+                  </div>
+              </div>
+              
+              <button className="secondary" style={{ width: '100%' }} onClick={() => {setActiveFile(file); setActionStatus({type:"", message:""});}}>
+                 Request Decryption
               </button>
             </div>
           ))}
           {files.length === 0 && !error && (
-              <p className="muted">No files found. Upload a secure asset to begin.</p>
+              <div style={{ gridColumn: '1 / -1', padding: '60px', textAlign: 'center', border: '1px dashed var(--border-light)', borderRadius: '16px' }}>
+                  <p className="text-muted">Vault is empty. Upload a file to see the encryption engine in action.</p>
+              </div>
           )}
         </div>
-      </div>
+      </main>
+
+      {/* Global Toast Notification */}
+      {toastMessage && (
+        <div className="toast-notification">
+            <span style={{ color: 'var(--accent-primary)' }}>ⓘ</span>
+            {toastMessage}
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      {isUploadOpen && (
+        <div className="modal-overlay" onMouseDown={() => setIsUploadOpen(false)}>
+          <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h2>Secure Upload</h2>
+              <button style={{ background: 'transparent', color: 'var(--text-secondary)', padding: 0 }} onClick={() => setIsUploadOpen(false)}>✕</button>
+            </div>
+            <UploadForm token={auth.access_token} onUploaded={() => { refreshFiles(); setIsUploadOpen(false); }} />
+          </div>
+        </div>
+      )}
+
+      {/* Decryption Request Modal */}
+      {activeFile && (
+        <div className="modal-overlay" onMouseDown={() => setActiveFile(null)}>
+          <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <h2>Authorize Access</h2>
+              <button style={{ background: 'transparent', color: 'var(--text-secondary)', padding: 0 }} onClick={() => setActiveFile(null)}>✕</button>
+            </div>
+            <p className="text-muted" style={{ marginBottom: '24px' }}>
+              Attempting to access <strong style={{color: 'white'}}>{activeFile.original_filename}</strong>. This request will be evaluated by the policy engine.
+            </p>
+            
+            <form onSubmit={handleDownload}>
+              <label>Policy Evaluator</label>
+              <select value={policyMode} onChange={(e) => setPolicyMode(e.target.value)}>
+                <option value="abac">ABAC (Contextual Verification)</option>
+                <option value="rbac">RBAC (Standard Role Check)</option>
+              </select>
+
+              <label>Client-Side Decryption Key (Base64)</label>
+              <input 
+                type="password" required autoFocus
+                placeholder="Paste your AES-GCM key..." 
+                value={decryptKey} 
+                onChange={(e) => setDecryptKey(e.target.value)} 
+                style={{ fontFamily: 'monospace' }}
+              />
+              
+              {actionStatus.message && (
+                  <div className={`alert ${actionStatus.type}`}>
+                      {actionStatus.message}
+                  </div>
+              )}
+              
+              <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
+                <button type="button" className="secondary" style={{ flex: 1 }} onClick={() => setActiveFile(null)} disabled={isProcessing}>Cancel</button>
+                <button type="submit" className="primary" style={{ flex: 2 }} disabled={isProcessing}>
+                    {isProcessing ? 'Processing...' : 'Evaluate & Decrypt'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

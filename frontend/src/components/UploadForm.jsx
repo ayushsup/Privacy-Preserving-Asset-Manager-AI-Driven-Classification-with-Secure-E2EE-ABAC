@@ -2,47 +2,51 @@ import { useState, useRef } from "react";
 import { uploadEncryptedFile } from "../services/api";
 import { encryptFile, exportKeyBase64, generateKey } from "../services/crypto";
 
-export default function UploadForm({ token, onUploaded }) {
+const DEPARTMENTS = ["Finance", "HR", "Healthcare", "Security", "Engineering", "Legal"];
+
+export default function UploadForm({ token, user, addAuditLog, onUploaded }) {
   const [file, setFile] = useState(null);
   const [department, setDepartment] = useState("Finance");
   const [summary, setSummary] = useState("");
   const [mode, setMode] = useState("abac");
-  
   const [keyInfo, setKeyInfo] = useState("");
   const [status, setStatus] = useState({ type: "", message: "" });
-  const [isDragging, setIsDragging] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
-  
-  const fileInputRef = useRef(null);
+  const [copied, setCopied] = useState(false);
+  const fileRef = useRef(null);
 
-  const handleDrag = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") setIsDragging(true);
-    else if (e.type === "dragleave") setIsDragging(false);
-  };
+  function handleDrag(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") setDragging(true);
+    else setDragging(false);
+  }
 
-  const handleDrop = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
-    }
-  };
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) setFile(dropped);
+  }
 
   async function handleUpload(e) {
     e.preventDefault();
     if (!file) {
-        setStatus({ type: "error", message: "Please select a file first." });
-        return;
+      setStatus({ type: "error", message: "Please select a file first." });
+      return;
     }
 
     setLoading(true);
-    setStatus({ type: "success", message: "Encrypting via Web Crypto API..." });
+    setStatus({ type: "success", message: "Generating AES-GCM key…" });
     setKeyInfo("");
 
     try {
       const key = await generateKey();
       const keyBase64 = await exportKeyBase64(key);
+
+      setStatus({ type: "success", message: "Encrypting file in browser…" });
       const { encryptedBlob, ivBase64 } = await encryptFile(file, key);
 
       const formData = new FormData();
@@ -52,91 +56,170 @@ export default function UploadForm({ token, onUploaded }) {
       formData.append("upload_summary", summary);
       formData.append("mode", mode);
 
-      setStatus({ type: "success", message: "Transmitting encrypted blob..." });
+      setStatus({ type: "success", message: "Transmitting encrypted blob…" });
       await uploadEncryptedFile(token, formData);
 
+      addAuditLog?.({
+        type: "UPLOAD",
+        action: "FILE_UPLOADED",
+        user: user?.username ?? "unknown",
+        detail: `${department} dept · ${mode.toUpperCase()} policy`,
+        resource: file.name,
+        status: "success",
+      });
+
       setKeyInfo(keyBase64);
-      setStatus({ type: "success", message: "Upload Complete!" });
-      setFile(null); setSummary("");
+      setStatus({ type: "success", message: "Upload complete." });
+      setFile(null);
+      setSummary("");
     } catch (err) {
-      setStatus({ type: "error", message: `Error: ${err.message}` });
+      setStatus({ type: "error", message: err.message || "Upload failed" });
+      addAuditLog?.({
+        type: "UPLOAD",
+        action: "UPLOAD_FAILED",
+        user: user?.username ?? "unknown",
+        detail: err.message || "Upload error",
+        resource: file?.name,
+        status: "error",
+      });
     } finally {
       setLoading(false);
     }
   }
 
-  // If upload succeeded, show the key screen instead of the form
-  if (keyInfo) {
-      return (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-              <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px', margin: '0 auto 24px' }}>✓</div>
-              <h3 style={{ marginBottom: '12px' }}>Asset Secured</h3>
-              <p className="text-muted" style={{ marginBottom: '24px' }}>
-                  Your file has been encrypted and stored. The server cannot read it. <strong>You must save the key below to access it later.</strong>
-              </p>
-              <div style={{ background: '#000', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-light)', marginBottom: '24px' }}>
-                  <p className="mono" style={{ color: 'var(--success)', wordBreak: 'break-all', margin: 0 }}>{keyInfo}</p>
-              </div>
-              <button className="primary" style={{ width: '100%' }} onClick={onUploaded}>
-                  Acknowledge & Close
-              </button>
-          </div>
-      );
+  async function copyKey() {
+    await navigator.clipboard.writeText(keyInfo);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2200);
   }
 
+  // ── Key reveal screen ───────────────────────────────────
+  if (keyInfo) {
+    return (
+      <div className="success-screen">
+        <div className="success-icon">✓</div>
+        <h3 style={{ marginBottom: 10 }}>Asset Secured</h3>
+        <p className="text-muted" style={{ marginBottom: 18, lineHeight: 1.6 }}>
+          Your file is encrypted. The server{" "}
+          <strong style={{ color: "var(--text-primary)" }}>cannot read it</strong>. Save
+          the key below — without it the file is irrecoverable.
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 6,
+          }}
+        >
+          <label style={{ margin: 0, flex: 1 }}>🔑 AES-256-GCM Decryption Key</label>
+          <button
+            type="button"
+            className="ghost"
+            style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+            onClick={copyKey}
+          >
+            {copied ? "✓ Copied" : "Copy"}
+          </button>
+        </div>
+        <div className="key-box">{keyInfo}</div>
+
+        <button className="primary" style={{ width: "100%" }} onClick={onUploaded}>
+          Acknowledge & Close
+        </button>
+      </div>
+    );
+  }
+
+  // ── Upload form ─────────────────────────────────────────
   return (
     <form onSubmit={handleUpload}>
-      <div 
-        className={`dropzone ${isDragging ? "active" : ""}`}
-        onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
-        onClick={() => fileInputRef.current.click()}
+      {/* Dropzone */}
+      <div
+        className={`dropzone ${dragging ? "on" : ""}`}
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
+        onDrop={handleDrop}
+        onClick={() => fileRef.current?.click()}
       >
-        <input type="file" ref={fileInputRef} onChange={(e) => setFile(e.target.files?.[0] || null)} style={{ display: "none" }} />
+        <input
+          type="file"
+          ref={fileRef}
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          style={{ display: "none" }}
+        />
         {file ? (
-            <div>
-                <p style={{ color: 'var(--accent-primary)', fontWeight: 600, marginBottom: '4px' }}>{file.name}</p>
-                <p className="text-muted">Ready for encryption</p>
-            </div>
+          <div>
+            <p
+              style={{
+                color: "var(--accent-light)",
+                fontWeight: 600,
+                marginBottom: 3,
+                fontFamily: "'Fira Code', monospace",
+                fontSize: "0.85rem",
+              }}
+            >
+              {file.name}
+            </p>
+            <p className="text-muted" style={{ fontSize: "0.78rem" }}>
+              {(file.size / 1024).toFixed(1)} KB · Ready for encryption
+            </p>
+          </div>
         ) : (
-            <div>
-                <div style={{ width: '48px', height: '48px', margin: '0 auto 16px', borderRadius: '50%', background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{color: 'var(--text-secondary)'}}>↑</span>
-                </div>
-                <p style={{ fontWeight: 500, color: 'white', marginBottom: '4px' }}>Click to browse or drag file here</p>
-                <p className="text-muted">Any file type supported</p>
-            </div>
+          <div>
+            <div className="dz-icon">↑</div>
+            <p style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 3 }}>
+              Click to browse or drag file here
+            </p>
+            <p className="text-muted" style={{ fontSize: "0.8rem" }}>
+              Any file type · Encrypted before upload
+            </p>
+          </div>
         )}
       </div>
 
-      <div style={{ display: "flex", gap: "16px", marginTop: "24px" }}>
-        <div style={{ flex: 1 }}>
-            <label>Department Tag</label>
-            <select value={department} onChange={(e) => setDepartment(e.target.value)}>
-                <option>Finance</option>
-                <option>HR</option>
-                <option>Healthcare</option>
-                <option>Security</option>
-            </select>
+      {/* Department + Mode */}
+      <div className="form-row" style={{ marginTop: 18 }}>
+        <div>
+          <label>Department Tag</label>
+          <select value={department} onChange={(e) => setDepartment(e.target.value)}>
+            {DEPARTMENTS.map((d) => (
+              <option key={d}>{d}</option>
+            ))}
+          </select>
         </div>
-        <div style={{ flex: 1 }}>
-            <label>Evaluation Mode</label>
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
-                <option value="abac">ABAC Context</option>
-                <option value="rbac">Strict RBAC</option>
-            </select>
+        <div>
+          <label>Evaluation Mode</label>
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="abac">ABAC Context</option>
+            <option value="rbac">Strict RBAC</option>
+          </select>
         </div>
       </div>
 
+      {/* Summary */}
       <label>AI Classification Summary</label>
       <textarea
-        placeholder="Briefly describe the file for the local NLP model without exposing raw data..."
-        value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} required
+        placeholder="Describe the file contents (used by local NLP classifier)…"
+        value={summary}
+        onChange={(e) => setSummary(e.target.value)}
+        rows={2}
+        required
       />
 
-      {status.message && <div className={`alert ${status.type}`} style={{ marginBottom: '20px' }}>{status.message}</div>}
+      {status.message && (
+        <div className={`alert ${status.type}`}>{status.message}</div>
+      )}
 
-      <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading || !file}>
-        {loading ? "Processing Block..." : "Encrypt & Upload"}
+      <button
+        type="submit"
+        className="primary"
+        style={{ width: "100%", marginTop: 16 }}
+        disabled={loading || !file}
+      >
+        {loading ? "Processing…" : "🔒 Encrypt & Upload"}
       </button>
     </form>
   );

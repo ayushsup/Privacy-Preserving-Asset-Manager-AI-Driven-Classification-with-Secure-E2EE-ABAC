@@ -86,7 +86,12 @@ p{color:var(--text-secondary);}
 }
 
 /* ── Shell ────────────────────────────────────────────────── */
-.app-shell{display:flex;height:100vh;overflow:hidden;}
+.app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw; /* Add full viewport width */
+  overflow: hidden;
+}
 
 /* ── Sidebar ─────────────────────────────────────────────── */
 .sidebar{
@@ -126,7 +131,6 @@ p{color:var(--text-secondary);}
   font-size:15px;
   box-shadow:0 0 18px var(--accent-glow);
 }
-.brand-text-wrap{}
 .brand-name{
   font-family:'Syne',sans-serif;font-weight:800;font-size:1rem;
   letter-spacing:-0.02em;color:var(--text-primary);line-height:1.1;
@@ -562,10 +566,16 @@ button.danger-ghost:hover:not(:disabled){background:var(--danger-bg);}
 .alert.success{background:var(--success-bg);color:#6ee7b7;border-color:var(--success-bdr);}
 
 /* ── Login ───────────────────────────────────────────────── */
-.login-shell{
-  min-height:100vh;display:flex;align-items:center;
-  justify-content:center;position:relative;overflow:hidden;
-  background:var(--bg-void);
+.login-shell {
+  flex: 1; /* Allow the container to grow and fill the remaining space */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column; /* Ensure contents stack properly without stretching horizontally */
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-void);
 }
 .login-bg{position:absolute;inset:0;pointer-events:none;}
 .lg-grid{

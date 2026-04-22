@@ -1,3 +1,4 @@
+<img width="1365" height="646" alt="AISOC 1" src="https://github.com/user-attachments/assets/df0dec08-79bb-4c4e-88c7-0b5eb0931a65" />
 
 # Privacy-Preserving Asset Manager: AI-Driven Classification with Secure E2EE & ABAC
 
@@ -64,7 +65,6 @@ npm run dev
 * **E2EE Overhead**: Evaluates the latency of browser-side encryption compared to standard uploads.
 * **AI Categorization Accuracy**: Assesses the zero-shot model's ability to correctly tag sensitive documents across departments.
 
-<img width="1365" height="646" alt="AISOC 1" src="https://github.com/user-attachments/assets/df0dec08-79bb-4c4e-88c7-0b5eb0931a65" />
 <img width="1362" height="646" alt="AISOC 2" src="https://github.com/user-attachments/assets/9953fa19-918c-4605-9a1d-bf2b81388199" />
 <img width="1365" height="641" alt="AISOC 3" src="https://github.com/user-attachments/assets/68a4b466-6371-41b4-8e5a-9b14aa7a58ca" />
 <img width="1362" height="633" alt="AISOC 4" src="https://github.com/user-attachments/assets/0b9b13c7-b9c2-4d8a-a962-8d80fe5bc282" />

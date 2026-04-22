@@ -36,7 +36,7 @@ export default function LoginForm({ onLogin }) {
   }
 
   return (
-    <div className="login-shell" style={{ width: "100%" }}>
+    <div className="login-shell" style={{ width: "100%", flex: 1, flexDirection: "column" }}>
       {/* Animated background */}
       <div className="login-bg">
         <div className="lg-grid" />
